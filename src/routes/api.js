@@ -1,8 +1,50 @@
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
+const multer = require("multer");
+const { v4: uuidv4 } = require("uuid");
+const path = require("path");
+const fs = require("fs");
 const User = require("../db/userModel");
 const Photo = require("../db/photoModel");
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const imagesDir = path.join(__dirname, "../../images");
+    // Ensure images directory exists
+    if (!fs.existsSync(imagesDir)) {
+      fs.mkdirSync(imagesDir, { recursive: true });
+    }
+    cb(null, imagesDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename
+    const uniqueName = uuidv4() + path.extname(file.originalname);
+    cb(null, uniqueName);
+  }
+});
+
+// File filter to only accept image files
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif|bmp|webp/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+  
+  if (mimetype && extname) {
+    return cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
 
 // Authentication middleware
 const requireAuth = (req, res, next) => {
@@ -17,16 +59,25 @@ const requireAuth = (req, res, next) => {
  */
 router.post("/admin/login", async (req, res) => {
   try {
-    const { login_name } = req.body;
+    const { login_name, password } = req.body;
     
     if (!login_name) {
       return res.status(400).json({ error: "Login name is required" });
     }
     
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+    
     const user = await User.findOne({ login_name: login_name });
     
     if (!user) {
-      return res.status(400).json({ error: "Invalid login name" });
+      return res.status(400).json({ error: "Invalid login name or password" });
+    }
+    
+    // Check password
+    if (user.password !== password) {
+      return res.status(400).json({ error: "Invalid login name or password" });
     }
     
     // Store user info in session
@@ -226,6 +277,133 @@ router.get("/photosOfUser/:id", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Error fetching user photos:", error);
     res.status(500).json({ error: "Server error fetching user photos" });
+  }
+});
+
+/**
+ * POST /photos/new - Upload a new photo for the current user
+ */
+router.post("/photos/new", requireAuth, upload.single('uploadedphoto'), async (req, res) => {
+  try {
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded. Please select a photo to upload." });
+    }
+    
+    // Create new photo document
+    const newPhoto = new Photo({
+      file_name: req.file.filename,
+      date_time: new Date(),
+      user_id: req.session.user_id,
+      comments: []
+    });
+    
+    // Save to database
+    await newPhoto.save();
+    
+    // Return success response with photo info
+    res.status(200).json({
+      message: "Photo uploaded successfully",
+      photo: {
+        _id: newPhoto._id,
+        file_name: newPhoto.file_name,
+        date_time: newPhoto.date_time,
+        user_id: newPhoto.user_id
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error uploading photo:", error);
+    
+    // If there was an error and a file was uploaded, try to clean it up
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkError) {
+        console.error("Error cleaning up uploaded file:", unlinkError);
+      }
+    }
+    
+    // Handle multer errors
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: "File too large. Maximum size is 10MB." });
+    }
+    
+    if (error.message === 'Only image files are allowed!') {
+      return res.status(400).json({ error: "Only image files are allowed. Please upload a valid image file." });
+    }
+    
+    res.status(500).json({ error: "Server error uploading photo" });
+  }
+});
+
+/**
+ * POST /user - Register a new user
+ */
+router.post("/user", async (req, res) => {
+  try {
+    const { login_name, password, first_name, last_name, location, description, occupation } = req.body;
+    
+    // Validate required fields
+    if (!login_name || typeof login_name !== 'string' || login_name.trim().length === 0) {
+      return res.status(400).json({ error: "Login name is required and cannot be empty" });
+    }
+    
+    if (!password || typeof password !== 'string' || password.trim().length === 0) {
+      return res.status(400).json({ error: "Password is required and cannot be empty" });
+    }
+    
+    if (!first_name || typeof first_name !== 'string' || first_name.trim().length === 0) {
+      return res.status(400).json({ error: "First name is required and cannot be empty" });
+    }
+    
+    if (!last_name || typeof last_name !== 'string' || last_name.trim().length === 0) {
+      return res.status(400).json({ error: "Last name is required and cannot be empty" });
+    }
+    
+    // Check if login_name already exists
+    const existingUser = await User.findOne({ login_name: login_name.trim() });
+    if (existingUser) {
+      return res.status(400).json({ error: "Login name already exists. Please choose a different one." });
+    }
+    
+    // Create new user
+    const newUser = new User({
+      login_name: login_name.trim(),
+      password: password.trim(),
+      first_name: first_name.trim(),
+      last_name: last_name.trim(),
+      location: location ? location.trim() : '',
+      description: description ? description.trim() : '',
+      occupation: occupation ? occupation.trim() : ''
+    });
+    
+    // Save to database
+    await newUser.save();
+    
+    // Return success response (excluding password)
+    res.status(200).json({
+      message: "User registered successfully",
+      user: {
+        _id: newUser._id,
+        login_name: newUser.login_name,
+        first_name: newUser.first_name,
+        last_name: newUser.last_name,
+        location: newUser.location,
+        description: newUser.description,
+        occupation: newUser.occupation
+      }
+    });
+    
+  } catch (error) {
+    console.error("Registration error:", error);
+    
+    // Handle MongoDB duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({ error: "Login name already exists. Please choose a different one." });
+    }
+    
+    res.status(500).json({ error: "Server error during registration" });
   }
 });
 

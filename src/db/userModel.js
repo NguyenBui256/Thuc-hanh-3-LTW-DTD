@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   description: { type: String },
   occupation: { type: String },
   login_name: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
 });
 
 // Check if the model already exists to avoid overwriting

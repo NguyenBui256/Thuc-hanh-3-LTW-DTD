@@ -48,6 +48,29 @@
   font-style: italic;
 }
 
+.add-photo-button {
+  background: rgba(40, 167, 69, 0.9);
+  color: white;
+  border: 2px solid rgba(40, 167, 69, 0.3);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.add-photo-button:hover {
+  background: rgba(40, 167, 69, 1);
+  border-color: rgba(40, 167, 69, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+}
+
+.add-photo-button:active {
+  transform: translateY(0);
+}
+
 .logout-button {
   background: rgba(255, 255, 255, 0.2);
   color: white;

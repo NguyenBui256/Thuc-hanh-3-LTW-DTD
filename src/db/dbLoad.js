@@ -28,6 +28,9 @@ async function dbLoad() {
     // Create login_name from first and last name (lowercase, no spaces)
     const login_name = (user.first_name + user.last_name).toLowerCase().replace(/\s+/g, '');
     
+    // Default password for testing (password, just for demo purposes)
+    const defaultPassword = "password";
+    
     console.log("Attempting to create user:", user.first_name, user.last_name, "with login_name:", login_name);
     
     userObj = new User({
@@ -37,6 +40,7 @@ async function dbLoad() {
       description: user.description,
       occupation: user.occupation,
       login_name: login_name,
+      password: defaultPassword,
     });
     try {
       await userObj.save();
@@ -47,6 +51,8 @@ async function dbLoad() {
         user.first_name + " " + user.last_name,
         " with login_name:",
         login_name,
+        " password:",
+        defaultPassword,
         " and ID ",
         user.objectID,
       );
