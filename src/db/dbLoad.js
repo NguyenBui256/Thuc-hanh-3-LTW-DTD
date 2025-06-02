@@ -25,25 +25,33 @@ async function dbLoad() {
   const userModels = models.userListModel();
   const mapFakeId2RealId = {};
   for (const user of userModels) {
+    // Create login_name from first and last name (lowercase, no spaces)
+    const login_name = (user.first_name + user.last_name).toLowerCase().replace(/\s+/g, '');
+    
+    console.log("Attempting to create user:", user.first_name, user.last_name, "with login_name:", login_name);
+    
     userObj = new User({
-      first: user.first_name,
+      first_name: user.first_name,
       last_name: user.last_name,
       location: user.location,
       description: user.description,
       occupation: user.occupation,
+      login_name: login_name,
     });
     try {
       await userObj.save();
       mapFakeId2RealId[user._id] = userObj._id;
       user.objectID = userObj._id;
       console.log(
-        "Adding user:",
+        "Successfully added user:",
         user.first_name + " " + user.last_name,
-        " with ID ",
+        " with login_name:",
+        login_name,
+        " and ID ",
         user.objectID,
       );
     } catch (error) {
-      console.error("Error create user", error);
+      console.error("Error creating user", user.first_name, user.last_name, ":", error.message);
     }
   }
   const photoModels = [];
