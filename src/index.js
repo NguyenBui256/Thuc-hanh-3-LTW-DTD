@@ -9,7 +9,6 @@ const express = require("express");
 const app = express();
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const session = require("express-session");
 const dbConnect = require("./db/dbConnect");
 const apiRoutes = require("./routes/api");
 
@@ -18,29 +17,23 @@ dbConnect();
 
 // Middleware
 app.use(cors({
-  origin: "http://localhost:3000",
+  origin: true, // Allow all origins for development
   credentials: true
 }));
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Session middleware
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-secret-key-here',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false, // Set to true if using HTTPS
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
+// Serve static images from the images directory
+app.use('/images', express.static(path.join(__dirname, '../images')));
 
 // API routes
-app.use("/", apiRoutes);
+app.use('/', apiRoutes);
 
-app.get("/test", (req, res) => {
-  res.json({ message: "API is working correctly" });
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: "Something went wrong!" });
 });
 
 const PORT = process.env.PORT || 3001;

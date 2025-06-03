@@ -5,8 +5,12 @@ const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const fs = require("fs");
+const jwt = require("jsonwebtoken");
 const User = require("../db/userModel");
 const Photo = require("../db/photoModel");
+
+// JWT secret key - should be in environment variables in production
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -46,12 +50,22 @@ const upload = multer({
   }
 });
 
-// Authentication middleware
+// JWT Authentication middleware
 const requireAuth = (req, res, next) => {
-  if (!req.session.user_id) {
-    return res.status(401).json({ error: "Unauthorized - Please login" });
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized - No token provided" });
   }
-  next();
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user_id = decoded.user_id;
+    req.login_name = decoded.login_name;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Unauthorized - Invalid token" });
+  }
 };
 
 /**
@@ -80,16 +94,23 @@ router.post("/admin/login", async (req, res) => {
       return res.status(400).json({ error: "Invalid login name or password" });
     }
     
-    // Store user info in session
-    req.session.user_id = user._id;
-    req.session.login_name = user.login_name;
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        user_id: user._id,
+        login_name: user.login_name 
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
     
-    // Return user info (excluding sensitive data)
+    // Return user info and token
     res.status(200).json({
       _id: user._id,
       first_name: user.first_name,
       last_name: user.last_name,
-      login_name: user.login_name
+      login_name: user.login_name,
+      token: token
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -98,34 +119,36 @@ router.post("/admin/login", async (req, res) => {
 });
 
 /**
- * POST /admin/logout - Logout a user
+ * POST /admin/logout - Logout a user (with JWT, logout is handled client-side)
  */
-router.post("/admin/logout", (req, res) => {
-  if (!req.session.user_id) {
-    return res.status(400).json({ error: "No user currently logged in" });
-  }
-  
-  req.session.destroy((err) => {
-    if (err) {
-      console.error("Logout error:", err);
-      return res.status(500).json({ error: "Server error during logout" });
-    }
-    res.status(200).json({ message: "Logout successful" });
-  });
+router.post("/admin/logout", requireAuth, (req, res) => {
+  // With JWT, logout is typically handled client-side by removing the token
+  // Server can optionally maintain a blacklist of tokens, but for simplicity we'll just return success
+  res.status(200).json({ message: "Logout successful" });
 });
 
 /**
- * GET /admin/session - Check current session status
+ * GET /admin/session - Check current token validity and return user info
  */
-router.get("/admin/session", (req, res) => {
-  if (req.session.user_id) {
+router.get("/admin/session", requireAuth, async (req, res) => {
+  try {
+    // If we reach here, the token is valid (verified by requireAuth middleware)
+    const user = await User.findById(req.user_id, "_id first_name last_name login_name");
+    
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    
     res.status(200).json({
-      user_id: req.session.user_id,
-      login_name: req.session.login_name,
+      user_id: user._id,
+      login_name: user.login_name,
+      first_name: user.first_name,
+      last_name: user.last_name,
       logged_in: true
     });
-  } else {
-    res.status(200).json({ logged_in: false });
+  } catch (error) {
+    console.error("Session check error:", error);
+    res.status(500).json({ error: "Server error checking session" });
   }
 });
 
@@ -157,7 +180,7 @@ router.post("/commentsOfPhoto/:photo_id", requireAuth, async (req, res) => {
     const newComment = {
       comment: comment.trim(),
       date_time: new Date(),
-      user_id: req.session.user_id
+      user_id: req.user_id
     };
     
     // Add comment to photo
@@ -166,7 +189,7 @@ router.post("/commentsOfPhoto/:photo_id", requireAuth, async (req, res) => {
     
     // Get the newly added comment with user info for response
     const addedComment = photo.comments[photo.comments.length - 1];
-    const commentUser = await User.findById(req.session.user_id, "_id first_name last_name");
+    const commentUser = await User.findById(req.user_id, "_id first_name last_name");
     
     const responseComment = {
       _id: addedComment._id,
@@ -294,7 +317,7 @@ router.post("/photos/new", requireAuth, upload.single('uploadedphoto'), async (r
     const newPhoto = new Photo({
       file_name: req.file.filename,
       date_time: new Date(),
-      user_id: req.session.user_id,
+      user_id: req.user_id,
       comments: []
     });
     

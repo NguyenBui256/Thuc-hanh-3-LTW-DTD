@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchModel } from './lib/fetchModelData';
+import { getToken, setToken, removeToken } from './lib/fetchModelData';
 import TopBar from './components/TopBar';
 import LoginRegister from './components/LoginRegister';
 import UserList from './components/UserList';
@@ -18,14 +19,21 @@ function App() {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const sessionData = await fetchModel('/admin/session');
-        if (sessionData.logged_in) {
-          // Get full user data
-          const userData = await fetchModel(`/user/${sessionData.user_id}`);
-          setUser(userData);
+        const token = getToken();
+        if (token) {
+          // Try to get session info using existing token
+          const sessionData = await fetchModel('/admin/session');
+          if (sessionData.logged_in) {
+            // Get full user data
+            const userData = await fetchModel(`/user/${sessionData.user_id}`);
+            setUser(userData);
+            setSelectedUserId(userData._id);
+          }
         }
       } catch (error) {
-        console.log('No active session');
+        console.log('No active session or invalid token');
+        // Clear invalid token
+        removeToken();
       } finally {
         setLoading(false);
       }
@@ -35,11 +43,17 @@ function App() {
   }, []);
 
   const handleLogin = (userData) => {
+    // Store JWT token
+    if (userData.token) {
+      setToken(userData.token);
+    }
     setUser(userData);
     setSelectedUserId(userData._id); // Show logged-in user's details by default
   };
 
   const handleLogout = () => {
+    // Clear JWT token
+    removeToken();
     setUser(null);
     setSelectedUserId(null);
     setShowPhotoUpload(false);
