@@ -4,20 +4,16 @@ require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const mongoose = require("mongoose");
 const session = require("express-session");
 const path = require("path");
 const dbConnect = require("./db/dbConnect");
-const apiRoutes = require("./routes/api");
+const apiRoutes = require("./routes/api.js");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors({
-  origin: true, // Allow all origins for development
-  credentials: true // Allow credentials (cookies, sessions)
-}));
+app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 

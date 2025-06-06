@@ -27,8 +27,6 @@ async function dbLoad() {
   for (const user of userModels) {
     // Create login_name from first and last name (lowercase, no spaces)
     const login_name = (user.first_name + user.last_name).toLowerCase().replace(/\s+/g, '');
-    
-    // Default password for testing (password, just for demo purposes)
     const defaultPassword = "password";
     
     console.log("Attempting to create user:", user.first_name, user.last_name, "with login_name:", login_name);

@@ -1,5 +1,5 @@
 const express = require("express");
-const router = express.Router();
+const router = express.Router(); // router chia module ~ (controller) de co the tai su dung
 const mongoose = require("mongoose");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
@@ -52,6 +52,7 @@ const upload = multer({
 
 // JWT Authentication middleware
 const requireAuth = (req, res, next) => {
+  // optional chaining
   const token = req.header('Authorization')?.replace('Bearer ', '');
   
   if (!token) {
@@ -60,8 +61,10 @@ const requireAuth = (req, res, next) => {
   
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    // Lấy thông tin từ token gán lại cho req Object để sử dụng trong các routes tiếp theo.
     req.user_id = decoded.user_id;
     req.login_name = decoded.login_name;
+    // Chuyển sang middleware/route handler tiếp theo
     next();
   } catch (error) {
     return res.status(401).json({ error: "Unauthorized - Invalid token" });
@@ -71,6 +74,7 @@ const requireAuth = (req, res, next) => {
 /**
  * POST /admin/login - Login a user
  */
+// middleware body-parser đã được define ở server.js
 router.post("/admin/login", async (req, res) => {
   try {
     const { login_name, password } = req.body;
@@ -122,8 +126,6 @@ router.post("/admin/login", async (req, res) => {
  * POST /admin/logout - Logout a user (with JWT, logout is handled client-side)
  */
 router.post("/admin/logout", requireAuth, (req, res) => {
-  // With JWT, logout is typically handled client-side by removing the token
-  // Server can optionally maintain a blacklist of tokens, but for simplicity we'll just return success
   res.status(200).json({ message: "Logout successful" });
 });
 
@@ -158,7 +160,7 @@ router.get("/admin/session", requireAuth, async (req, res) => {
 router.post("/commentsOfPhoto/:photo_id", requireAuth, async (req, res) => {
   try {
     const photoId = req.params.photo_id;
-    const { comment } = req.body;
+    const { comment, parent_id } = req.body;
     
     // Validate photo ID format
     if (!mongoose.Types.ObjectId.isValid(photoId)) {
@@ -175,35 +177,100 @@ router.post("/commentsOfPhoto/:photo_id", requireAuth, async (req, res) => {
     if (!photo) {
       return res.status(400).json({ error: "Photo not found" });
     }
-    
+
+    // If this is a reply, validate parent comment exists
+    if (parent_id) {
+      if (!mongoose.Types.ObjectId.isValid(parent_id)) {
+        return res.status(400).json({ error: "Invalid parent comment ID format" });
+      }
+      
+      const parentComment = photo.comments.id(parent_id);
+      if (!parentComment) {
+        return res.status(400).json({ error: "Parent comment not found" });
+      }
+    }
+
     // Create new comment object
     const newComment = {
       comment: comment.trim(),
       date_time: new Date(),
-      user_id: req.user_id
+      user_id: req.user_id,
+      parent_id: parent_id || null
     };
-    
+
     // Add comment to photo
     photo.comments.push(newComment);
     await photo.save();
-    
+
     // Get the newly added comment with user info for response
     const addedComment = photo.comments[photo.comments.length - 1];
     const commentUser = await User.findById(req.user_id, "_id first_name last_name");
-    
+
     const responseComment = {
       _id: addedComment._id,
       comment: addedComment.comment,
       date_time: addedComment.date_time,
-      user: commentUser
+      user: commentUser,
+      parent_id: addedComment.parent_id
     };
-    
+
     res.status(200).json(responseComment);
   } catch (error) {
     console.error("Error adding comment:", error);
     res.status(500).json({ error: "Server error adding comment" });
   }
 });
+
+// /**
+//  * GET /commentsOfPhoto/:photo_id - Get all comments for a photo including nested replies
+//  */
+// router.get("/commentsOfPhoto/:photo_id", requireAuth, async (req, res) => {
+//   try {
+//     const photoId = req.params.photo_id;
+    
+//     // Validate photo ID format
+//     if (!mongoose.Types.ObjectId.isValid(photoId)) {
+//       return res.status(400).json({ error: "Invalid photo ID format" });
+//     }
+    
+//     // Find the photo and populate comments with user info
+//     const photo = await Photo.findById(photoId);
+//     if (!photo) {
+//       return res.status(400).json({ error: "Photo not found" });
+//     }
+    
+//     // Process comments to include user information and organize replies
+//     const processedComments = await Promise.all(photo.comments.map(async (comment) => {
+//       const commentUser = await User.findById(comment.user_id, "_id first_name last_name");
+      
+//       // Process replies to include user info
+//       const processedReplies = await Promise.all(comment.replies.map(async (reply) => {
+//         const replyUser = await User.findById(reply.user_id, "_id first_name last_name");
+//         return {
+//           _id: reply._id,
+//           comment: reply.comment,
+//           date_time: reply.date_time,
+//           user: replyUser,
+//           parent_id: comment._id
+//         };
+//       }));
+      
+//       return {
+//         _id: comment._id,
+//         comment: comment.comment,
+//         date_time: comment.date_time,
+//         user: commentUser,
+//         parent_id: null,
+//         replies: processedReplies
+//       };
+//     }));
+    
+//     res.status(200).json(processedComments);
+//   } catch (error) {
+//     console.error("Error fetching comments:", error);
+//     res.status(500).json({ error: "Server error fetching comments" });
+//   }
+// });
 
 /**
  * Get list of users for the navigation sidebar
@@ -281,14 +348,33 @@ router.get("/photosOfUser/:id", requireAuth, async (req, res) => {
       
       // Process comments to include minimal user info
       if (photo.comments && photo.comments.length > 0) {
-        photoObj.comments = await Promise.all(photo.comments.map(async (comment) => {
+        // First, get all comments that are not replies (parent comments)
+        const parentComments = photo.comments.filter(comment => !comment.parent_id);
+        
+        photoObj.comments = await Promise.all(parentComments.map(async (comment) => {
           const commentUser = await User.findById(comment.user_id, "_id first_name last_name");
           
+          // Get all replies for this comment
+          const replies = photo.comments.filter(reply => reply.parent_id && reply.parent_id.toString() === comment._id.toString());
+          
+          // Process replies to include user info
+          const processedReplies = await Promise.all(replies.map(async (reply) => {
+            const replyUser = await User.findById(reply.user_id, "_id first_name last_name");
+            return {
+              _id: reply._id,
+              comment: reply.comment,
+              date_time: reply.date_time,
+              user: replyUser || { _id: reply.user_id, first_name: "Unknown", last_name: "User" },
+              parent_id: reply.parent_id
+            };
+          }));
+
           return {
             _id: comment._id,
             comment: comment.comment,
             date_time: comment.date_time,
-            user: commentUser || { _id: comment.user_id, first_name: "Unknown", last_name: "User" }
+            user: commentUser || { _id: comment.user_id, first_name: "Unknown", last_name: "User" },
+            replies: processedReplies
           };
         }));
       }
@@ -430,4 +516,60 @@ router.post("/user", async (req, res) => {
   }
 });
 
+router.put("/user/:id", requireAuth, async (req,res) => {
+  try {
+    const userId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid user ID format" });
+    }
+    const user = await User.findById(userId);
+    if(req.user_id != user._id) {
+      return res.status(403).json({error: "You are not authorized to update this user"})
+    }
+    const { login_name, password, first_name, last_name, location, description, occupation } = req.body;
+    if(!login_name || !first_name || !last_name || !location || !description || !occupation) {
+      return res.status(400).json({error: "All fields are required"})
+    }
+    
+    // Check if new login_name is different from current one
+    if(login_name !== user.login_name) {
+      const existingUser = await User.findOne({login_name: login_name});
+      if(existingUser) {
+        return res.status(400).json({error: "Login name already exists. Please choose a different one."})
+      }
+      user.login_name = login_name;
+    }
+    
+    // Update password if provided
+    if(password) {
+      user.password = password;
+    }
+    
+    // Update other fields
+    user.first_name = first_name;
+    user.last_name = last_name;
+    user.location = location;
+    user.description = description;
+    user.occupation = occupation;
+    
+    await user.save();
+    return res.status(200).json({
+      message: "User updated successfully",
+      user: {
+        _id: user._id,
+        login_name: user.login_name,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        location: user.location,
+        description: user.description,
+        occupation: user.occupation
+      }
+    });
+  } catch(error) {
+    console.error("Update user error:", error);
+    return res.status(500).json({error: "Server error during user update"})
+  }
+})
+
 module.exports = router; 
+
